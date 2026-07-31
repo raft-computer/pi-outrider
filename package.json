@@ -1,0 +1,38 @@
+{
+	"name": "pi-outrider",
+	"version": "0.1.0",
+	"description": "Guide-to-executor model handoffs for Pi coding agent",
+	"type": "module",
+	"license": "MIT",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"pi-coding-agent",
+		"pi-extension",
+		"model-handoff",
+		"model-routing"
+	],
+	"files": [
+		"core.ts",
+		"index.ts"
+	],
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-ai": "^0.83.0",
+		"@earendil-works/pi-coding-agent": "^0.83.0",
+		"@types/node": "^22.19.19",
+		"typebox": "^1.3.7",
+		"typescript": "^5.9.3"
+	},
+	"scripts": {
+		"test": "node --test core.test.ts",
+		"typecheck": "tsc -p ."
+	}
+}
