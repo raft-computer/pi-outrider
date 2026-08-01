@@ -1,6 +1,6 @@
 {
 	"name": "pi-outrider",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Guide-to-executor model handoffs for Pi coding agent",
 	"type": "module",
 	"license": "MIT",
