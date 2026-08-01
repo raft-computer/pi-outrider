@@ -12,6 +12,8 @@ export type OutriderState = "idle" | "armed" | "guiding" | "handoff_pending" | "
 export interface ModelRef {
 	provider: string;
 	id: string;
+	/** Optional per-phase thinking level; unset inherits the session level. */
+	thinking?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface MutationResult {

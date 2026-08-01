@@ -50,6 +50,9 @@ function loadConfig(): OutriderConfig | string {
 		if (!ref || typeof ref.provider !== "string" || typeof ref.id !== "string" || !ref.provider || !ref.id) {
 			return `Outrider: ${key} in ${CONFIG_PATH} must be { "provider": "...", "id": "..." }`;
 		}
+		if (ref.thinking !== undefined && !["minimal", "low", "medium", "high", "xhigh", "max"].includes(ref.thinking)) {
+			return `Outrider: ${key}.thinking in ${CONFIG_PATH} must be one of minimal|low|medium|high|xhigh|max`;
+		}
 	}
 	return {
 		guideModel: cfg.guideModel as ModelRef,
@@ -68,6 +71,16 @@ export default function (pi: ExtensionAPI) {
 
 	const notify = (message: string, level: "info" | "warning" | "error") => {
 		if (lastCtx?.hasUI) lastCtx.ui.notify(message, level);
+	};
+
+	// Session thinking level before Outrider first touched it; phases without
+	// an explicit `thinking` fall back to this instead of inheriting the
+	// previous phase's level.
+	let sessionThinking: ReturnType<ExtensionAPI["getThinkingLevel"]> | undefined;
+
+	const applyThinking = (ref: ModelRef) => {
+		sessionThinking ??= pi.getThinkingLevel();
+		pi.setThinkingLevel(ref.thinking ?? sessionThinking);
 	};
 
 	pi.registerCommand("outrider", {
@@ -122,11 +135,14 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`Outrider: failed to switch to guide model ${refName(config.guideModel)}. Not armed.`, "error");
 				return;
 			}
+			applyThinking(config.guideModel);
 
 			core = new OutriderProtocol(config, {
 				switchModel: async (ref) => {
 					const model = resolved.get(refName(ref));
-					return model ? pi.setModel(model) : false;
+					if (!model || !(await pi.setModel(model))) return false;
+					applyThinking(ref);
+					return true;
 				},
 				appendHiddenInstruction: (content) => {
 					pi.sendMessage({ customType: "outrider", content, display: false }, { deliverAs: "steer" });
@@ -201,6 +217,8 @@ export default function (pi: ExtensionAPI) {
 			const guide = resolved.get(refName(core.config.guideModel));
 			if (!guide || !(await pi.setModel(guide))) {
 				ctx.ui.notify("Outrider: failed to switch back to the guide model", "error");
+			} else {
+				applyThinking(core.config.guideModel);
 			}
 		}
 	});

@@ -28,6 +28,7 @@ To install it only for the current project, use `pi install -l npm:pi-outrider`.
 ```
 
 - `guideModel` / `executorModel`: any model visible in `/model`. Both are resolved and auth-checked when arming; there is no silent fallback.
+- `thinking` (optional, per model ref): thinking level for that phase, one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. E.g. `{ "provider": "...", "id": "...", "thinking": "xhigh" }`. Unset inherits the session's level from before Outrider was armed.
 - `ignoredPaths`: mutations touching only these paths never trigger the handoff. Patterns containing `/` match the path relative to the working directory; others match the basename (gitignore style). `*` does not cross `/`, `**` does.
 - `armForNextTaskOnly`: when `true` (default), one task is guided and the protocol resets to idle on settle. When `false`, it re-arms and switches back to the guide model after each task.
 

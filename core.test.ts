@@ -91,11 +91,11 @@ test("failed mutation does not switch", async () => {
 });
 
 test("ready then meaningful mutation switches", async () => {
-	const { core, runtime } = guiding();
+	const { core, runtime } = guiding({ executorModel: { provider: "p", id: "executor", thinking: "low" } });
 	core.signalDirectionReady();
 	await core.onMutation({ successful: true, paths: ["src/app.test.ts"] });
 	assert.equal(core.state, "executing");
-	assert.deepEqual(runtime.switched, [{ provider: "p", id: "executor" }]);
+	assert.deepEqual(runtime.switched, [{ provider: "p", id: "executor", thinking: "low" }]);
 });
 
 test("parallel qualifying tool results switch only once", async () => {
