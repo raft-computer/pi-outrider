@@ -1,8 +1,13 @@
 /**
  * Outrider pi adapter: a strong guide model starts the task, explores, signals
  * direction readiness, and makes the first meaningful modification. The
- * runtime then switches to a cheaper executor model in the same session, which
- * inherits the full trajectory and finishes the work.
+ * runtime then switches to a cheaper executor model in the same session.
+ *
+ * Two handoff media (config `handoff`):
+ *   "plan" (default): readiness requires a self-contained handoff plan; after
+ *   the switch the guide's exploration is pruned from the LLM context on every
+ *   request, so the executor works from the task, the plan, and the tree.
+ *   "trajectory": the executor inherits the full session trajectory.
  *
  * Commands: /outrider, /outrider status, /outrider cancel
  * Config:   .pi/outrider.json in the project, else ~/.pi/agent/outrider.json
@@ -19,10 +24,16 @@ import { Type } from "typebox";
 import {
 	DEFAULT_IGNORED_PATHS,
 	GUIDE_INSTRUCTION,
+	GUIDE_INSTRUCTION_PLAN,
+	GUIDE_MARKER,
+	HANDOFF_MARKER,
 	type ModelRef,
 	type OutriderConfig,
 	OutriderProtocol,
+	pruneGuideTrajectory,
 	refName,
+	TRAJECTORY_MARKER,
+	validatePlan,
 } from "./core.ts";
 
 // ponytail: mirrors pi's own agent-dir derivation; a custom piConfig.configDir
@@ -40,6 +51,7 @@ const CONFIG_TEMPLATE: OutriderConfig = {
 	executorModel: { provider: "PROVIDER", id: "CHEAP_MODEL_ID" },
 	ignoredPaths: DEFAULT_IGNORED_PATHS,
 	armForNextTaskOnly: true,
+	handoff: "plan",
 };
 
 function loadConfig(path: string): OutriderConfig | string {
@@ -63,11 +75,15 @@ function loadConfig(path: string): OutriderConfig | string {
 			return `Outrider: ${key}.thinking in ${path} must be one of minimal|low|medium|high|xhigh|max`;
 		}
 	}
+	if (cfg.handoff !== undefined && cfg.handoff !== "plan" && cfg.handoff !== "trajectory") {
+		return `Outrider: handoff in ${path} must be "plan" or "trajectory"`;
+	}
 	return {
 		guideModel: cfg.guideModel as ModelRef,
 		executorModel: cfg.executorModel as ModelRef,
 		ignoredPaths: Array.isArray(cfg.ignoredPaths) ? cfg.ignoredPaths.map(String) : DEFAULT_IGNORED_PATHS,
 		armForNextTaskOnly: cfg.armForNextTaskOnly !== false,
+		handoff: cfg.handoff ?? "plan",
 	};
 }
 
@@ -155,12 +171,16 @@ export default function (pi: ExtensionAPI) {
 					return true;
 				},
 				appendHiddenInstruction: (content) => {
-					pi.sendMessage({ customType: "outrider", content, display: false }, { deliverAs: "steer" });
+					const customType = config.handoff === "plan" ? HANDOFF_MARKER : TRAJECTORY_MARKER;
+					pi.sendMessage({ customType, content, display: false }, { deliverAs: "steer" });
 				},
 				notify,
 			});
 			core.arm();
-			ctx.ui.notify(`Outrider armed: ${refName(config.guideModel)} -> ${refName(config.executorModel)}`, "info");
+			ctx.ui.notify(
+				`Outrider armed (${config.handoff} handoff): ${refName(config.guideModel)} -> ${refName(config.executorModel)}`,
+				"info",
+			);
 		},
 	});
 
@@ -169,12 +189,21 @@ export default function (pi: ExtensionAPI) {
 		label: "Outrider Direction Ready",
 		description:
 			"Signal that the implementation direction is established in an active Outrider guide phase. " +
-			"Call it once, then perform the first meaningful code modification yourself.",
+			"In plan handoff mode, pass the complete handoff plan; it is the only thing the executor " +
+			"receives from the guide phase. Call it once, then perform the first meaningful code " +
+			"modification yourself.",
 		parameters: Type.Object({
 			direction: Type.Optional(Type.String({ description: "One-line summary of the chosen implementation direction" })),
+			plan: Type.Optional(
+				Type.String({
+					description:
+						"Complete handoff plan (required in plan handoff mode): goal, current state, " +
+						"key insights, ordered implementation steps with file paths, and verification commands",
+				}),
+			),
 		}),
-		async execute(_toolCallId, _params) {
-			switch (core?.signalDirectionReady() ?? "not_guiding") {
+		async execute(_toolCallId, params) {
+			switch (core?.signalDirectionReady(params.plan) ?? "not_guiding") {
 				case "recorded":
 					notify("Outrider: direction ready", "info");
 					return {
@@ -188,6 +217,16 @@ export default function (pi: ExtensionAPI) {
 					};
 				case "already_recorded":
 					return { content: [{ type: "text", text: "Direction was already recorded. Continue working." }], details: {} };
+				case "plan_rejected":
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Plan rejected: ${validatePlan(params.plan)}. Provide the full handoff plan in the plan parameter and call this tool again.`,
+							},
+						],
+						details: {},
+					};
 				default:
 					return { content: [{ type: "text", text: "No active Outrider guide phase; signal ignored." }], details: {} };
 			}
@@ -197,7 +236,24 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (_event, ctx) => {
 		lastCtx = ctx;
 		if (!core?.taskStart()) return;
-		return { message: { customType: "outrider", content: GUIDE_INSTRUCTION, display: false } };
+		const planMode = core.config.handoff === "plan";
+		return {
+			message: {
+				customType: planMode ? GUIDE_MARKER : TRAJECTORY_MARKER,
+				content: planMode ? GUIDE_INSTRUCTION_PLAN : GUIDE_INSTRUCTION,
+				display: false,
+			},
+		};
+	});
+
+	// Plan-mode clean handoff: prune closed guide segments (GUIDE_MARKER ..
+	// HANDOFF_MARKER) from every LLM request. The transform is per request and
+	// never touches the stored session, so /resume and the session log keep the
+	// full history. Trajectory mode never emits these markers, so this is a
+	// no-op for it.
+	pi.on("context", async (event) => {
+		const pruned = pruneGuideTrajectory(event.messages);
+		return pruned.length === event.messages.length ? undefined : { messages: pruned };
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
