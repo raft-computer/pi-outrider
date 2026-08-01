@@ -5,12 +5,13 @@
  * inherits the full trajectory and finishes the work.
  *
  * Commands: /outrider, /outrider status, /outrider cancel
- * Config:   outrider.json next to this file (created on first /outrider)
+ * Config:   .pi/outrider.json in the project, else ~/.pi/agent/outrider.json
+ *           (the global one is created on first /outrider)
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isEditToolResult, isWriteToolResult } from "@earendil-works/pi-coding-agent";
@@ -24,7 +25,15 @@ import {
 	refName,
 } from "./core.ts";
 
-const CONFIG_PATH = fileURLToPath(new URL("./outrider.json", import.meta.url));
+// ponytail: mirrors pi's own agent-dir derivation; a custom piConfig.configDir
+// install would need the real config API if pi ever exposes it to extensions.
+const GLOBAL_CONFIG_PATH = join(homedir(), ".pi", "agent", "outrider.json");
+
+/** Project config (`.pi/outrider.json` in the working directory) wins over the global one. */
+function resolveConfigPath(cwd: string): string {
+	const project = join(cwd, ".pi", "outrider.json");
+	return existsSync(project) ? project : GLOBAL_CONFIG_PATH;
+}
 
 const CONFIG_TEMPLATE: OutriderConfig = {
 	guideModel: { provider: "PROVIDER", id: "STRONG_MODEL_ID" },
@@ -33,25 +42,25 @@ const CONFIG_TEMPLATE: OutriderConfig = {
 	armForNextTaskOnly: true,
 };
 
-function loadConfig(): OutriderConfig | string {
-	if (!existsSync(CONFIG_PATH)) {
-		writeFileSync(CONFIG_PATH, `${JSON.stringify(CONFIG_TEMPLATE, null, "\t")}\n`);
-		return `Outrider: created ${CONFIG_PATH}. Set guideModel and executorModel, then run /outrider again.`;
+function loadConfig(path: string): OutriderConfig | string {
+	if (!existsSync(path)) {
+		writeFileSync(path, `${JSON.stringify(CONFIG_TEMPLATE, null, "\t")}\n`);
+		return `Outrider: created ${path}. Set guideModel and executorModel, then run /outrider again. Per-project config: .pi/outrider.json.`;
 	}
 	let raw: unknown;
 	try {
-		raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
+		raw = JSON.parse(readFileSync(path, "utf8"));
 	} catch (err) {
-		return `Outrider: invalid JSON in ${CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}`;
+		return `Outrider: invalid JSON in ${path}: ${err instanceof Error ? err.message : String(err)}`;
 	}
 	const cfg = raw as Partial<OutriderConfig>;
 	for (const key of ["guideModel", "executorModel"] as const) {
 		const ref = cfg[key];
 		if (!ref || typeof ref.provider !== "string" || typeof ref.id !== "string" || !ref.provider || !ref.id) {
-			return `Outrider: ${key} in ${CONFIG_PATH} must be { "provider": "...", "id": "..." }`;
+			return `Outrider: ${key} in ${path} must be { "provider": "...", "id": "..." }`;
 		}
 		if (ref.thinking !== undefined && !["minimal", "low", "medium", "high", "xhigh", "max"].includes(ref.thinking)) {
-			return `Outrider: ${key}.thinking in ${CONFIG_PATH} must be one of minimal|low|medium|high|xhigh|max`;
+			return `Outrider: ${key}.thinking in ${path} must be one of minimal|low|medium|high|xhigh|max`;
 		}
 	}
 	return {
@@ -107,7 +116,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const config = loadConfig();
+			const configPath = resolveConfigPath(ctx.cwd);
+			const config = loadConfig(configPath);
 			if (typeof config === "string") {
 				ctx.ui.notify(config, "error");
 				return;
@@ -120,7 +130,7 @@ export default function (pi: ExtensionAPI) {
 				[config.executorModel, executor],
 			] as const) {
 				if (!model) {
-					ctx.ui.notify(`Outrider: model ${refName(ref)} not found. Check ${CONFIG_PATH}.`, "error");
+					ctx.ui.notify(`Outrider: model ${refName(ref)} not found. Check ${configPath}.`, "error");
 					return;
 				}
 				if (!ctx.modelRegistry.hasConfiguredAuth(model)) {

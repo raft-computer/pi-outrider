@@ -16,19 +16,19 @@ To install it only for the current project, use `pi install -l npm:pi-outrider`.
 
 ## Configuration
 
-`outrider.json` next to `index.ts`. Created with placeholder values on first `/outrider` if missing.
+`.pi/outrider.json` in the working directory (per project), falling back to `~/.pi/agent/outrider.json` (global). Resolved when arming, so different projects can pin different model pairs. If neither exists, the global one is created with placeholder values on first `/outrider`.
 
 ```json
 {
-	"guideModel": { "provider": "openai-codex", "id": "gpt-5.6-sol" },
-	"executorModel": { "provider": "openai-codex", "id": "gpt-5.6-luna" },
+	"guideModel": { "provider": "openai-codex", "id": "gpt-5.6-sol", "thinking": "xhigh" },
+	"executorModel": { "provider": "openai-codex", "id": "gpt-5.6-luna", "thinking": "medium" },
 	"ignoredPaths": [".git/**", ".pi/**", "tmp/**", "temp/**", "*.md", "TODO", "TODO.*"],
 	"armForNextTaskOnly": true
 }
 ```
 
 - `guideModel` / `executorModel`: any model visible in `/model`. Both are resolved and auth-checked when arming; there is no silent fallback.
-- `thinking` (optional, per model ref): thinking level for that phase, one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. E.g. `{ "provider": "...", "id": "...", "thinking": "xhigh" }`. Unset inherits the session's level from before Outrider was armed.
+- `thinking` (optional, per model ref): thinking level for that phase, one of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Unset inherits the session's level from before Outrider was armed.
 - `ignoredPaths`: mutations touching only these paths never trigger the handoff. Patterns containing `/` match the path relative to the working directory; others match the basename (gitignore style). `*` does not cross `/`, `**` does.
 - `armForNextTaskOnly`: when `true` (default), one task is guided and the protocol resets to idle on settle. When `false`, it re-arms and switches back to the guide model after each task.
 
